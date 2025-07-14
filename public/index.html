@@ -6,7 +6,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
   <style>
-    :root{--bg-1:#0f0f16;--bg-2:#191926;--card:#222634;--fg:#e7e7ec;--muted:#8b8ba3;--accent:#3b82f6;--radius:.625rem}
+    :root { --bg-1:#0f0f16; --bg-2:#191926; --card:#222634; --fg:#e7e7ec; --muted:#8b8ba3; --accent:#3b82f6; --radius:.625rem }
     html,body{height:100%;margin:0;font-family:"Inter",system-ui,sans-serif;color:var(--fg);background:linear-gradient(135deg,var(--bg-1)0%,var(--bg-2)100%)}
     button,input{font-family:inherit;outline:none}
     .container{max-width:1100px;margin:0 auto;padding:2rem 1rem 4rem;display:flex;flex-direction:column;gap:2.5rem}
@@ -16,7 +16,7 @@
     .card h2{margin:0 0 .25rem;font-size:1.15rem;font-weight:600}
     label{font-size:.75rem;text-transform:uppercase;color:var(--muted);margin-bottom:.25rem}
     input{width:90%;margin:0 auto;padding:.55rem .75rem;background:#2d3144;border:1px solid #3b3f57;border-radius:var(--radius);color:var(--fg);font-size:.9rem;text-align:center}
-    input::placeholder{color:var(--muted)}
+    input::placeholder{color:var(--muted);text-align:center}
     .btn{background:var(--accent);border:none;color:#fff;padding:.55rem 1rem;border-radius:var(--radius);font-weight:600;cursor:pointer;transition:transform .12s ease}
     .btn:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(59,130,246,.3)}
     .btn--ghost{background:transparent;border:1px solid var(--accent);color:var(--accent)}
@@ -72,109 +72,110 @@
     </div>
   </div>
 
-<script>
-/***** ADDRESSES *****/
-const TOKEN_KPU="0x513368b11474270500033ebFa8f07d30ca4C945F";
-const TOKEN_ARG="0x0993CAF2399B7b5fAf2BF7E89a9f61E4d1D9F824";
-const SWAP_ADDR="0x4cA28c2E3cdfd2eeED183405FafA923f84EFB34C";
+  <script>
+    /* -------- Addresses -------- */
+    const TOKEN_KPU = "0x513368b11474270500033ebFa8f07d30ca4C945F";
+    const TOKEN_ARG = "0x0993CAF2399B7b5fAf2BF7E89a9f61E4d1D9F824";
+    const SWAP_ADDR = "0x4cA28c2E3cdfd2eeED183405FafA923f84EFB34C";
 
-/***** ABIs *****/
-const tokenAbi=[
-  "function approve(address,uint256) returns(bool)"
-];
-const swapAbi=[
-  "function swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
-  "function getPrice(address,address) view returns(uint256)"
-];
+    /* -------- ABIs -------- */
+    const tokenAbi = [
+      "function approve(address,uint256) returns(bool)",
+      "function balanceOf(address) view returns(uint256)"
+    ];
+    const swapAbi = [
+      "function swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
+      "function getPrice(address,address) view returns(uint256)"
+    ];
 
-/***** PROVIDER *****/
-let provider=new ethers.JsonRpcProvider("https://rpc.sepolia.org");
-let signer,myAccount;
+    /* -------- Globals -------- */
+    let provider = new ethers.JsonRpcProvider("https://rpc.sepolia.org");
+    let signer, myAccount;
+    let order  = [TOKEN_KPU, TOKEN_ARG]; // [input, output]
+    let priceRaw = 0n;
+    let reserves = { in:0n, out:0n };
 
-/***** STATE *****/
-let order=[TOKEN_KPU,TOKEN_ARG];
-let priceRaw=0n; // scaled 1e18
-let priceTimer;
+    /* -------- Shortcuts -------- */
+    const $      = id => document.getElementById(id);
+    const parse18= v  => ethers.parseUnits(v || "0", 18);
+    const token  = a  => new ethers.Contract(a, tokenAbi, signer||provider);
+    const swap   = () => new ethers.Contract(SWAP_ADDR, swapAbi, signer||provider);
 
-/***** HELPERS *****/
-const $=id=>document.getElementById(id);
-const parse18=v=>ethers.parseUnits(v||"0",18);
-const token=a=>new ethers.Contract(a,tokenAbi,signer||provider);
-const swap =()=>new ethers.Contract(SWAP_ADDR,swapAbi,signer||provider);
+    /* -------- UX Helpers -------- */
+    async function safeTx(p){
+      try{const tx=await p;await tx.wait();alert(`✅ Confirmed\n${tx.hash}`);updatePrice();}
+      catch(e){alert("❌ "+(e.reason||e.message));console.error(e)}
+    }
 
-function fmt4(x){return Number(x).toFixed(4);}
+    /* -------- Price & Reserves -------- */
+    async function fetchReserves(){
+      reserves.in  = await token(order[0]).balanceOf(SWAP_ADDR);
+      reserves.out = await token(order[1]).balanceOf(SWAP_ADDR);
+    }
 
-async function safeTx(p){
-  try{const tx=await p;await tx.wait();alert(`✅ Confirmed\n${tx.hash}`);updatePrice();}
-  catch(e){alert("❌ "+(e.reason||e.message));console.error(e);}
-}
+    async function updatePrice(){
+      try{
+        await fetchReserves();
+        priceRaw = await swap().getPrice(order[0], order[1]); // reserveIn / reserveOut * 1e18
+        const base  = order[0]===TOKEN_KPU?"KPU":"ARG";
+        const quote = order[1]===TOKEN_KPU?"KPU":"ARG";
+        const val   = Number(ethers.formatUnits(priceRaw,18)).toFixed(4);
+        $("price").textContent = `1.0000 ${base} ≈ ${val} ${quote}`;
+      }catch(e){priceRaw=0n;$("price").textContent="";console.warn(e.message)}
+      computeOut();
+    }
 
-/***** PRICE & PREVIEW *****/
-async function updatePrice(){
-  try{
-    priceRaw=await swap().getPrice(order[0],order[1]);
-    const base =order[0]===TOKEN_KPU?"KPU":"ARG";
-    const quote=order[1]===TOKEN_KPU?"KPU":"ARG";
-    $("price").textContent=`1.0000 ${base} ≈ ${fmt4(ethers.formatUnits(priceRaw,18))} ${quote}`;
-  }catch{priceRaw=0n;$("price").textContent="";}
-  computeOut();
-}
+    function computeOut(){
+      const txt = $("swapIn").value.trim();
+      if(!txt || priceRaw===0n || reserves.out===0n) { $("outPreview").textContent=""; return; }
+      try{
+        const amtIn = parse18(txt);
+        // amountOut = amtIn * reserveOut / reserveIn (same as contract)
+        const out = (amtIn * reserves.out) / reserves.in;
+        const sym = order[1]===TOKEN_KPU?"KPU":"ARG";
+        $("outPreview").textContent = `≈ ${Number(ethers.formatUnits(out,18)).toFixed(4)} ${sym}`;
+      }catch{ $("outPreview").textContent=""; }
+    }
 
-function computeOut(){
-  const v=$("swapIn").value.trim();
-  if(!v||priceRaw===0n){$("outPreview").textContent="";return;}
-  try{
-    const amt=parse18(v);
-    const out=(amt*priceRaw)/1000000000000000000n; // divide 1e18
-    const sym=order[1]===TOKEN_KPU?"KPU":"ARG";
-    $("outPreview").textContent=`≈ ${fmt4(ethers.formatUnits(out,18))} ${sym}`;
-  }catch{ $("outPreview").textContent=""; }
-}
+    /* -------- Wallet -------- */
+    $("btnConnect").onclick = async () => {
+      if(!window.ethereum) return alert("MetaMask not detected");
+      provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      signer   = await provider.getSigner();
+      myAccount= await signer.getAddress();
+      $("account").textContent = `${myAccount.slice(0,6)}…${myAccount.slice(-4)}`;
+      updatePrice();
+      clearInterval(window._priceInt);
+      window._priceInt = setInterval(updatePrice, 30000);
+    };
 
-/***** WALLET *****/
-$("btnConnect").onclick=async()=>{
-  if(!window.ethereum) return alert("MetaMask not detected");
-  provider=new ethers.BrowserProvider(window.ethereum);
-  await provider.send("eth_requestAccounts",[]);
-  signer=await provider.getSigner();
-  myAccount=await signer.getAddress();
-  $("account").textContent=`${myAccount.slice(0,6)}…${myAccount.slice(-4)}`;
-  updatePrice();
-  clearInterval(priceTimer);
-  priceTimer=setInterval(updatePrice,30000);
-};
+    /* -------- UI Events -------- */
+    $("btnToggle").onclick = () => {
+      order.reverse();
+      $("tokenA").textContent = order[0]===TOKEN_KPU?"KPU":"ARG";
+      $("tokenB").textContent = order[1]===TOKEN_KPU?"KPU":"ARG";
+      updatePrice();
+    };
 
-/***** UI EVENTS *****/
-$("btnToggle").onclick=()=>{
-  order.reverse();
-  $("tokenA").textContent=order[0]===TOKEN_KPU?"KPU":"ARG";
-  $("tokenB").textContent=order[1]===TOKEN_KPU?"KPU":"ARG";
-  updatePrice();
-};
+    $("swapIn").addEventListener("input", computeOut);
 
-$("swapIn").addEventListener("input",computeOut);
+    $("kpuApprove").onclick = () => safeTx(token(TOKEN_KPU).approve(SWAP_ADDR, parse18($("kpuAllow").value)));
+    $("argApprove").onclick = () => safeTx(token(TOKEN_ARG).approve(SWAP_ADDR, parse18($("argAllow").value)));
 
-$("kpuApprove").onclick=()=>safeTx(token(TOKEN_KPU).approve(SWAP_ADDR,parse18($("kpuAllow").value)));
-$("argApprove").onclick=()=>safeTx(token(TOKEN_ARG).approve(SWAP_ADDR,parse18($("argAllow").value)));
+    $("btnSwap").onclick = () => {
+      if(!signer) return alert("Connect wallet first");
+      const amountIn = parse18($("swapIn").value);
+      if(amountIn===0n) return alert("Enter amount");
+      const to       = $("swapTo").value || myAccount;
+      const deadline = Math.floor(Date.now()/1000)+600;
+      safeTx(swap().swapExactTokensForTokens(amountIn, amountIn, order, to, deadline));
+    };
 
-$("btnSwap").onclick = () => {
-  if (!signer) return alert("Connect wallet first");
-
-  const amountIn = parse18($("swapIn").value);
-  if (amountIn === 0n) return alert("Enter amount");
-
-  const expected = expectedOut(amountIn);                 // usa getPrice
-  const minOut   = (expected * (10000n - BigInt(SLIPPAGE_BPS))) / 10000n; // 1 %
-
-  const to       = $("swapTo").value || myAccount;
-  const deadline = Math.floor(Date.now() / 1000) + 600;
-
-  safeTx( swap().swapExactTokensForTokens(amountIn, minOut, order, to, deadline) );
-};
-
-/***** INIT *****/
-updatePrice();
-priceTimer=setInterval(updatePrice,30000);
-</script>
+    /* -------- Init -------- */
+    updatePrice();
+    clearInterval(window._priceInt);
+    window._priceInt = setInterval(updatePrice, 30000);
+  </script>
 </body>
 </html>
